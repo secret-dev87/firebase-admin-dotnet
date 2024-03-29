@@ -15,6 +15,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.IdentityModel.Tokens;
 
 namespace FirebaseAdmin.Auth.Jwt
 {
@@ -30,5 +31,13 @@ namespace FirebaseAdmin.Auth.Jwt
         /// <param name="cancellationToken">A cancellation token to monitor the asynchronous
         /// operation.</param>
         Task<IReadOnlyList<PublicKey>> GetPublicKeysAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Returns a set of Json Web keys.
+        /// </summary>
+        /// <returns>A task that completes with a list of public keys.</returns>
+        /// <param name="cancellationToken">A cancellation token to monitor the asynchronous
+        /// operation.</param>
+        Task<IReadOnlyList<JsonWebKey>> GetJwksAsync(CancellationToken cancellationToken);
     }
 }

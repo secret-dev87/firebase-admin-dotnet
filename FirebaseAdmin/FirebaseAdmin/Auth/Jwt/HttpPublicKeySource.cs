@@ -24,6 +24,7 @@ using System.Threading.Tasks;
 using FirebaseAdmin.Util;
 using Google.Apis.Http;
 using Google.Apis.Util;
+using Microsoft.IdentityModel.Tokens;
 using Newtonsoft.Json;
 using static Google.Apis.Requests.BatchRequest;
 using RSAKey = System.Security.Cryptography.RSA;
@@ -49,6 +50,7 @@ namespace FirebaseAdmin.Auth.Jwt
         private readonly HttpClientFactory clientFactory;
         private DateTime expirationTime;
         private IReadOnlyList<PublicKey> cachedKeys;
+        private IReadOnlyList<JsonWebKey> jwks;
 
         public HttpPublicKeySource(string certUrl, IClock clock, HttpClientFactory clientFactory)
         {
@@ -56,6 +58,49 @@ namespace FirebaseAdmin.Auth.Jwt
             this.clock = clock.ThrowIfNull(nameof(clock));
             this.clientFactory = clientFactory.ThrowIfNull(nameof(clientFactory));
             this.expirationTime = clock.UtcNow;
+        }
+
+        public async Task<IReadOnlyList<JsonWebKey>> GetJwksAsync(
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (this.jwks == null || this.clock.UtcNow >= this.expirationTime)
+            {
+                await this.cacheLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+                try
+                {
+                    var now = this.clock.UtcNow;
+                    if (this.jwks == null || now >= this.expirationTime)
+                    {
+                        using (var httpClient = this.CreateHttpClient())
+                        {
+                            var request = new HttpRequestMessage()
+                            {
+                                Method = HttpMethod.Get,
+                                RequestUri = new Uri(this.certUrl),
+                            };
+
+                            var response = await httpClient
+                                .SendAndDeserializeAsync<Dictionary<string, List<JsonWebKey>>>(request, cancellationToken)
+                                .ConfigureAwait(false);
+
+                            this.jwks = this.ParseWebKeys(response);
+                            var cacheControl = response.HttpResponse.Headers.CacheControl;
+                            if (cacheControl?.MaxAge != null)
+                            {
+                                this.expirationTime = now.Add(cacheControl.MaxAge.Value)
+                                    .Subtract(ClockSkew);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    this.cacheLock.Release();
+                }
+            }
+
+            return this.jwks;
         }
 
         public async Task<IReadOnlyList<PublicKey>> GetPublicKeysAsync(
@@ -81,11 +126,8 @@ namespace FirebaseAdmin.Auth.Jwt
                             var response = await httpClient
                                 .SendAndDeserializeAsync<Dictionary<string, string>>(request, cancellationToken)
                                 .ConfigureAwait(false);
-                            if (this.certUrl != "https://firebaseappcheck.googleapis.com/v1/jwks")
-                            {
-                                this.cachedKeys = this.ParseKeys(response);
-                            }
 
+                            this.cachedKeys = this.ParseKeys(response);
                             var cacheControl = response.HttpResponse.Headers.CacheControl;
                             if (cacheControl?.MaxAge != null)
                             {
@@ -114,6 +156,29 @@ namespace FirebaseAdmin.Auth.Jwt
                     RequestExceptionHandler = HttpKeySourceErrorHandler.Instance,
                     DeserializeExceptionHandler = HttpKeySourceErrorHandler.Instance,
                 });
+        }
+
+        private IReadOnlyList<JsonWebKey> ParseWebKeys(DeserializedResponseInfo<Dictionary<string, List<JsonWebKey>>> response)
+        {
+            if (response.Result.Count == 0)
+            {
+                throw new FirebaseAuthException(
+                    ErrorCode.Unknown,
+                    "No public keys present in the response.",
+                    AuthErrorCode.CertificateFetchFailed,
+                    response: response.HttpResponse);
+            }
+
+            var builder = ImmutableList.CreateBuilder<JsonWebKey>();
+            foreach (var entry in response.Result)
+            {
+                foreach (var value in entry.Value)
+                {
+                    builder.Add(value);
+                }
+            }
+
+            return builder.ToImmutableList();
         }
 
         private IReadOnlyList<PublicKey> ParseKeys(DeserializedResponseInfo<Dictionary<string, string>> response)

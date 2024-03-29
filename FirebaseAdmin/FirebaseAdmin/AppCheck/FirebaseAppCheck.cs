@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using FirebaseAdmin.Auth;
+using FirebaseAdmin.Auth.Jwt;
 
 namespace FirebaseAdmin.AppCheck
 {
@@ -98,13 +100,13 @@ namespace FirebaseAdmin.AppCheck
 
             AppCheckDecodedToken decodedToken = await this.appCheckTokenVerifier.VerifyTokenAsync(appCheckToken).ConfigureAwait(false);
 
-            if (options.Consume)
+            if (options != null && options.Consume)
             {
                 bool alreadyConsumed = await this.appCheckApiClient.VerifyReplayProtectionAsync(appCheckToken).ConfigureAwait(false);
 
                 return new AppCheckVerifyTokenResponse()
                 {
-                    AppId = decodedToken.AppId,
+                    AppId = decodedToken.Subject,
                     AlreadyConsumed = alreadyConsumed,
                     Token = decodedToken,
                 };
@@ -112,7 +114,7 @@ namespace FirebaseAdmin.AppCheck
 
             return new AppCheckVerifyTokenResponse()
             {
-                AppId = decodedToken.AppId,
+                AppId = decodedToken.Subject,
                 Token = decodedToken,
             };
         }

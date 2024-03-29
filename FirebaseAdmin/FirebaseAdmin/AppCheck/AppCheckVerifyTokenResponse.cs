@@ -1,4 +1,6 @@
-﻿namespace FirebaseAdmin.AppCheck
+﻿using FirebaseAdmin.Auth;
+
+namespace FirebaseAdmin.AppCheck
 {
     /// <summary>
     /// Interface representing a verified App Check token response.

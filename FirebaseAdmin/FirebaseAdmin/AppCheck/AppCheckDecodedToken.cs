@@ -63,9 +63,10 @@ namespace FirebaseAdmin.AppCheck
 
         internal sealed class Args
         {
+            [JsonProperty("app_id")]
             public string AppId { get; internal set; }
 
-            [JsonProperty("app_id")]
+            [JsonProperty("iss")]
             internal string Issuer { get; set; }
 
             [JsonProperty("sub")]
