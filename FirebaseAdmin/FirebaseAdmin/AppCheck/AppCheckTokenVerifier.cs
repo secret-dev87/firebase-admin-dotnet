@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using FirebaseAdmin.Auth.Jwt;
 using Google.Apis.Auth;
 using Google.Apis.Util;
+using Microsoft.IdentityModel.Tokens;
 
 namespace FirebaseAdmin.AppCheck
 {
@@ -82,12 +84,12 @@ namespace FirebaseAdmin.AppCheck
                 errorMessage = "The provided app check token has incorrect algorithm. Expected 'RS256'" +
                 " but got " + $"{header.Algorithm}" + ".";
             }
-            else if (payload.Audience.Length > 0 || payload.Audience.Contains(scopedProjectId))
+            else if (payload.Audience.Length <= 0 || !payload.Audience.Contains(scopedProjectId))
             {
-                errorMessage = "The provided app check token has incorrect \"aud\" (audience) claim. Expected " +
-                    scopedProjectId + "but got" + payload.Audience + "." + projectIdMessage;
+                errorMessage = "The provided app check token has incorrect 'aud' (audience) claim. Expected " +
+                    scopedProjectId + " but got " + payload.Audience + "." + projectIdMessage;
             }
-            else if (payload.Issuer.StartsWith(AppCheckIssuer))
+            else if (!payload.Issuer.StartsWith(AppCheckIssuer))
             {
                 errorMessage = $"The provided app check token has incorrect \"iss\" (issuer) claim.";
             }
@@ -108,7 +110,7 @@ namespace FirebaseAdmin.AppCheck
                     AppCheckErrorCode.InvalidArgument);
             }
 
-            await this.VerifySignatureAsync(segments, header.KeyId, cancellationToken)
+            await this.VerifySignatureAsync(token, header.KeyId, cancellationToken)
                 .ConfigureAwait(false);
             var allClaims = JwtUtils.Decode<Dictionary<string, object>>(segments[1]);
 
@@ -147,14 +149,30 @@ namespace FirebaseAdmin.AppCheck
             return new AppCheckTokenVerifier(args);
         }
 
+        internal static bool ValidateToken(string token, TokenValidationParameters validationParams)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            try
+            {
+                tokenHandler.ValidateToken(token, validationParams, out var validatedToken);
+                return validatedToken != null;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         /// <summary>
         /// Verifies the integrity of a JWT by validating its signature. The JWT must be specified
         /// as an array of three segments (header, body and signature).
         /// </summary>
         private async Task VerifySignatureAsync(
-            string[] segments, string keyId, CancellationToken cancellationToken)
+            string token, string keyId, CancellationToken cancellationToken)
         {
             byte[] hash;
+            string[] segments = token.Split('.');
+
             using (var hashAlg = SHA256.Create())
             {
                 hash = hashAlg.ComputeHash(
@@ -162,11 +180,21 @@ namespace FirebaseAdmin.AppCheck
             }
 
             var signature = JwtUtils.Base64DecodeToBytes(segments[2]);
-            var keys = await this.KeySource.GetPublicKeysAsync(cancellationToken)
+            var keys = await this.KeySource.GetJwksAsync(cancellationToken)
                 .ConfigureAwait(false);
-            var verified = keys.Any(key =>
-                key.Id == keyId && key.RSA.VerifyHash(
-                    hash, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+            var jwk = keys.FirstOrDefault(key => key.Kid == keyId);
+
+            var validationParameters = new TokenValidationParameters
+            {
+                ValidateAudience = false,
+                ValidateIssuer = false,
+                IssuerSigningKey = jwk,
+            };
+
+            var verified = ValidateToken(token, validationParameters);
+
+            /*var verified = keys.Any(key =>
+                key.Kid == keyId);*/
             if (!verified)
             {
                 throw new FirebaseAppCheckException(
