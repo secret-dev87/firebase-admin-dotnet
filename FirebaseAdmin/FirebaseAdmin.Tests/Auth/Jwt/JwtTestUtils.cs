@@ -26,6 +26,7 @@ using FirebaseAdmin.Tests;
 using FirebaseAdmin.Util;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Util;
+using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 #pragma warning disable SYSLIB0027
@@ -125,6 +126,12 @@ namespace FirebaseAdmin.Auth.Jwt.Tests
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return Task.FromResult(this.rsa);
+            }
+
+            public Task<IReadOnlyList<JsonWebKey>> GetJwksAsync(
+                CancellationToken cancellationToken)
+            {
+                throw new NotImplementedException();
             }
         }
     }
